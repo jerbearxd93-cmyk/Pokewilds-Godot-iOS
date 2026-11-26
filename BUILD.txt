@@ -28,6 +28,32 @@ separate application ID to avoid replacing the installed game.
 6. Export into a new build directory and test on devices. Test first launch,
 GAME FILES folder selection, save/load, controller input, and multiplayer.
 
+IOS
+1. iOS export needs macOS with Xcode installed and the matching Godot iOS export
+templates. The same Godot 4.7.2 Standard editor opens the project for every
+platform; nothing in project/project.godot is exclusive to Android.
+2. Open Project > Export > iOS. Fill in Application > App Store Team ID (the
+preset ships a placeholder and export fails without it) and the bundle
+identifier. The preset uses com.pokewilds.godot, the same identifier as the
+Android package; change it if that identifier is not yours.
+3. The preset writes an Xcode project into project/build/ios/Pokewilds and does
+not call xcodebuild (Export Project Only). Open Pokewilds.xcodeproj, pick your
+team under Signing & Capabilities, then build on a device. Clear Application >
+Export Project Only to have Godot produce the .ipa/XCArchive itself once
+signing is configured.
+4. The project renders with GL Compatibility, which is also the only renderer
+the iOS simulator supports. Landscape comes from
+display/window/handheld/orientation; the app does not support portrait.
+5. Multiplayer: iOS has no embedded libzt, so ONLINE runs on the local network
+only and iOS asks for Local Network permission on first use
+(NSLocalNetworkUsageDescription is added by the preset). Broadcast lobby
+discovery also needs Apple's multicast entitlement, which requires an approved
+request; without it, join with a JOIN CODE or a direct address. Hosting from an
+iPhone works over TCP on the game port.
+6. Saves and settings live in the app sandbox (user://) and are covered by
+device backups, but they are not browsable in the Files app: the GAME FILES
+shared folder is Android-only. See NOTES.md for what to test on a Mac.
+
 EMBEDDED ZEROTIER (MULTIPLAYER)
 MULTIPLAYER needs no ZeroTier app, account or network owner. The Android build
 embeds libzt and joins a ZeroTier ad-hoc network (controller-less, no member
@@ -67,3 +93,5 @@ LICENSES
 Retain all existing credits. Godot and Android/Gradle dependencies have their own
 terms; follow their distribution notices. The game licensing issues in
 LICENSE-STATUS.txt must be resolved before an open-source release.
+
+
