@@ -111,8 +111,9 @@ func _create_reference_controls() -> void:
         add_child(control)
     # Android leaves edit mode with system Back. iOS has no Back control, so
     # the hint itself is the save button and says so.
-    var back_hint := "ANDROID BACK SAVES" if OS.has_feature("android") \
-        else "TAP HERE TO SAVE"
+    var back_hint := "TAP HERE TO SAVE"
+    if OS.has_feature("android"):
+        back_hint = "ANDROID BACK SAVES"
     $EditHint.text = "DRAG CONTROLS - " + back_hint
     $EditHint.add_theme_font_override("font", preload("res://assets/touch_ui/Anton-Regular.ttf"))
     $EditHint.add_theme_font_size_override("font_size", 7)
