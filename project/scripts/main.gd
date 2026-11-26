@@ -1456,11 +1456,21 @@ func _ready() -> void:
     $UI/TouchConfig/VBox.add_child(files_button)
     $UI/TouchConfig/VBox.move_child(files_button,$UI/TouchConfig/VBox/Close.get_index())
     files_button.pressed.connect(_open_game_files_menu)
+    # CHOOSE FOLDER and SYNC FILES drive the Android shared folder bridge.
+    files_button.visible = OS.get_name() == "Android"
     var mods_button := Button.new()
     mods_button.name="Modding";mods_button.text="MODDING"
     $UI/TouchConfig/VBox.add_child(mods_button)
     $UI/TouchConfig/VBox.move_child(mods_button,files_button.get_index()+1)
     mods_button.pressed.connect(_open_modding_menu)
+    # iOS has no system Back control, so the panel also carries the only route
+    # to the quit prompt there; Android keeps its Back control for that.
+    var quit_button := Button.new()
+    quit_button.name="QuitGame";quit_button.text="QUIT GAME"
+    quit_button.visible = OS.has_feature("mobile")
+    $UI/TouchConfig/VBox.add_child(quit_button)
+    $UI/TouchConfig/VBox.move_child(quit_button,mods_button.get_index()+1)
+    quit_button.pressed.connect(_quit_from_touch_config)
     _refresh_touch_config_labels()
     _apply_touch_config_theme()
 
@@ -4240,7 +4250,7 @@ func _notification(what: int) -> void:
             touch_controls._release_all()
         return
     if what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_WM_WINDOW_FOCUS_IN]:
-        if is_node_ready() and _is_android_touch_runtime():
+        if is_node_ready() and _is_touch_runtime():
             touch_controls.refresh_system_theme()
             if touch_config.visible:
                 _apply_touch_config_theme()
@@ -4250,14 +4260,14 @@ func _notification(what: int) -> void:
         return
 
     # Android system Back requests quit; controller Select has its own map action.
-    if not _is_android_touch_runtime():
+    if not _is_touch_runtime():
         if started and not quit_prompt_open:
             _open_quit_prompt()
         return
     _handle_android_back_request()
 
 func _handle_android_back_request() -> void:
-    if not _is_android_touch_runtime() or progression_active:
+    if not _is_touch_runtime() or progression_active:
         return
     if is_instance_valid(waypoint_ui):
         if waypoint_ui.naming:
@@ -4336,7 +4346,7 @@ func _input(event: InputEvent) -> void:
     # Depending on the Android device/launcher, the hardware Back control can
     # arrive as KEY_BACK instead of a window Back notification.
     if event is InputEventKey and event.pressed and not event.echo and \
-            _is_android_touch_runtime() and (event.keycode == KEY_BACK or \
+            _is_touch_runtime() and (event.keycode == KEY_BACK or \
                 event.physical_keycode == KEY_BACK):
         _handle_android_back_request()
         get_viewport().set_input_as_handled()
@@ -4480,7 +4490,7 @@ func _unhandled_input(event: InputEvent) -> void:
         return
 
     if event.is_action_pressed("touch_config"):
-        if not _is_android_touch_runtime():
+        if not _is_touch_runtime():
             return
         if touch_controls.edit_mode:
             touch_controls.end_edit()
@@ -4839,10 +4849,12 @@ func _menu_stick_event_is_blocked(event: InputEvent) -> bool:
         return false
     return true
 
-func _is_android_touch_runtime() -> bool:
-    return OS.has_feature("android") or (
+func _is_touch_runtime() -> bool:
+    # Touch-first mobile runtime: Android and iOS. Android also has system Back
+    # and the shared folder bridge; iOS reaches the same panels from the pad.
+    return OS.has_feature("mobile") or (
         is_instance_valid(touch_controls)
-        and bool(touch_controls.get("android_runtime"))
+        and bool(touch_controls.get("touch_runtime"))
     )
 
 func _setup_menu_navigation() -> void:
@@ -12533,7 +12545,7 @@ func _open_game_files_menu() -> void:
     game_files_menu.open()
 
 func _open_touch_config(from_options: bool = false) -> void:
-    if not from_options and not _is_android_touch_runtime():
+    if not from_options and not _is_touch_runtime():
         touch_config.visible = false
         touch_controls.set_game_active(false)
         return
@@ -12565,6 +12577,10 @@ func _move_controls() -> void:
 
 func _reset_layout() -> void:
     touch_controls.reset_layout()
+
+func _quit_from_touch_config() -> void:
+    _close_touch_config()
+    _open_quit_prompt()
 
 func _close_touch_config() -> void:
     touch_config.visible = false
@@ -13083,6 +13099,9 @@ func _prepare_swipe_cursor() -> void:
     var contents := touch_config.find_child("VBox",true,false)
     for child in contents.get_children():
         if child is BaseButton or child is Slider:
+            # Rows a platform hides (GAME FILES off Android, QUIT off desktop)
+            # are skipped so the swipe cursor can never land on one.
+            if not (child as CanvasItem).visible: continue
             swipe_rows.append(child)
             var index := swipe_rows.size()-1
             child.mouse_entered.connect(func(): _select_swipe_row(index))
