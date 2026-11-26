@@ -5,9 +5,9 @@ static var android_storage: Variant = null
 
 static func root_path() -> String:
     if not directory.is_empty(): return directory
-    # Android can move the whole live folder to external storage. iOS exports
-    # have no equivalent shared location, so they keep the sandbox user://
-    # folder, which survives updates and is covered by device backups.
+    # Android can move the whole live folder to external storage. iOS has no
+    # shared external folder, but its own Documents folder is the one the Files
+    # app browses, so the live folder lives there instead of in user://.
     directory = "user://"
     if OS.get_name() == "Android":
         if Engine.has_singleton("JavaClassWrapper"):
@@ -18,10 +18,28 @@ static func root_path() -> String:
         if directory == "user://":
             last_error = "Android external storage is unavailable. Saves remain in private storage."
             push_error(last_error)
+    elif OS.get_name() == "iOS":
+        var documents := _ios_documents_root()
+        if documents.is_empty():
+            last_error = "The app Documents folder is unavailable. Saves remain in private storage."
+            push_error(last_error)
+        else:
+            directory = documents
     return directory
 
 static func path(relative: String) -> String:
     return root_path().path_join(relative)
+
+## The app's own Documents folder, the one the Files app browses when the export
+## exposes user data (user_data/accessible_from_files_app). Anything unhelpful
+## from the platform returns "" so the caller keeps the private user:// root
+## instead of writing into a folder that does not exist.
+static func _ios_documents_root() -> String:
+    var documents := OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
+    if documents.is_empty() or not documents.is_absolute_path(): return ""
+    if not DirAccess.dir_exists_absolute(documents):
+        if DirAccess.make_dir_recursive_absolute(documents) != OK: return ""
+    return documents
 
 static func initialize() -> Error:
     var error := _initialize_external()
