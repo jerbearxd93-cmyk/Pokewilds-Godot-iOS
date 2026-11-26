@@ -1,0 +1,153 @@
+name: Build unsigned iOS IPA
+
+# Compiles the iOS preset on a macOS runner and uploads an unsigned .ipa that
+# can be re-signed and sideloaded from the phone (AltStore, Sideloadly, Xcode
+# alternatives). Nothing here is signed and no Apple account is used.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ios-port
+
+permissions:
+  contents: read
+
+env:
+  GODOT_RELEASE: "4.7.2-stable"
+  GODOT_EDITOR_ZIP: "Godot_v4.7.2-stable_macos.universal.zip"
+  GODOT_TEMPLATES_TPZ: "Godot_v4.7.2-stable_export_templates.tpz"
+  # Must match the engine version exactly: 4.7.2.stable.
+  GODOT_TEMPLATES_DIR: "4.7.2.stable"
+  # Must match the "name" of the iOS preset in project/export_presets.cfg.
+  EXPORT_PRESET: "iOS"
+
+jobs:
+  build:
+    name: Export, compile and package
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Download Godot editor and iOS export templates
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/godot"
+          cd "$RUNNER_TEMP/godot"
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          curl -fL --retry 3 --retry-delay 5 -o editor.zip "$BASE/${GODOT_EDITOR_ZIP}"
+          curl -fL --retry 3 --retry-delay 5 -o templates.tpz "$BASE/${GODOT_TEMPLATES_TPZ}"
+          unzip -q editor.zip -d editor
+          unzip -q templates.tpz -d templates
+          ls -la editor
+          ls -la templates/templates | head -n 30
+
+      - name: Install iOS export templates
+        run: |
+          set -euo pipefail
+          DEST="$HOME/Library/Application Support/Godot/export_templates/${GODOT_TEMPLATES_DIR}"
+          mkdir -p "$DEST"
+          cp -R "$RUNNER_TEMP/godot/templates/templates/." "$DEST/"
+          # The exporter looks for ios.zip here and refuses to run without it.
+          test -f "$DEST/ios.zip"
+          ls -lh "$DEST" | head -n 30
+
+      - name: Locate the Godot binary
+        id: godot
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/godot/editor/Godot.app/Contents/MacOS/Godot"
+          if [ ! -x "$BIN" ]; then
+            BIN="$(find "$RUNNER_TEMP/godot/editor" -type f -name 'Godot*' -perm -u+x | head -n 1)"
+          fi
+          test -x "$BIN"
+          echo "path=$BIN" >> "$GITHUB_OUTPUT"
+          "$BIN" --version
+
+      - name: Import assets and rebuild the .godot cache
+        working-directory: project
+        run: |
+          set -euo pipefail
+          # .godot is not in the repository, so every import runs here.
+          "${{ steps.godot.outputs.path }}" --headless --path . --import
+          test -d .godot
+
+      - name: Export the Xcode project
+        working-directory: project
+        run: |
+          set -euo pipefail
+          rm -rf build/ios
+          mkdir -p build/ios
+          # export_project_only is set in the preset, so no .ipa or XCArchive is
+          # built here: this writes build/ios/Pokewilds.xcodeproj and the app
+          # sources beside it.
+          "${{ steps.godot.outputs.path }}" --headless --path . \
+            --export-release "${EXPORT_PRESET}" build/ios/Pokewilds.xcodeproj
+          ls -la build/ios
+          # Diagnostics only: the exported folder name comes from the target.
+          if [ -f build/ios/Pokewilds/Info.plist ]; then
+            plutil -p build/ios/Pokewilds/Info.plist | head -n 60
+          fi
+
+      - name: Compile for iphoneos without signing
+        run: |
+          set -euo pipefail
+          XCODEPROJ="project/build/ios/Pokewilds.xcodeproj"
+          test -d "$XCODEPROJ"
+          TARGET="$(xcodebuild -project "$XCODEPROJ" -list -json 2>/dev/null \
+            | jq -r '.project.targets[0] // empty' || true)"
+          if [ -z "$TARGET" ] || [ "$TARGET" = "null" ]; then
+            TARGET="Pokewilds"
+          fi
+          echo "Building target: $TARGET"
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -target "$TARGET" \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            VALIDATE_PRODUCT=NO \
+            SYMROOT="$PWD/project/build/sym" \
+            OBJROOT="$PWD/project/build/obj" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package the unsigned .ipa
+        run: |
+          set -euo pipefail
+          APP="$(find project/build/sym -maxdepth 3 -type d -name '*.app' | head -n 1)"
+          test -n "$APP"
+          echo "App bundle: $APP"
+          lipo -info "$APP/$(basename "$APP" .app)" || true
+          rm -rf project/build/ipa
+          mkdir -p project/build/ipa/Payload
+          cp -R "$APP" project/build/ipa/Payload/
+          cd project/build/ipa
+          # -y keeps symlinks as symlinks; an .ipa is a zip with Payload/ on top.
+          zip -qry ../Pokewilds-ios-unsigned.ipa Payload
+          cd ..
+          ls -lh Pokewilds-ios-unsigned.ipa
+          unzip -l Pokewilds-ios-unsigned.ipa | head -n 25
+          plutil -p ipa/Payload/*/Info.plist \
+            | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|CFBundleVersion|MinimumOSVersion|UISupportedInterfaceOrientations' || true
+
+      - name: Upload the unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pokewilds-ios-unsigned
+          path: project/build/Pokewilds-ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
