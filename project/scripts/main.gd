@@ -1466,7 +1466,10 @@ func _ready() -> void:
     # iOS has no system Back control, so the panel also carries the only route
     # to the quit prompt there; Android keeps its Back control for that.
     var quit_button := Button.new()
-    quit_button.name="QuitGame";quit_button.text="QUIT GAME"
+    quit_button.name="QuitGame"
+    # iOS gives an app no way to end itself, so the same row returns to the
+    # title screen there; Android keeps the real quit it has always had.
+    quit_button.text = "TITLE SCREEN" if OS.has_feature("ios") else "QUIT GAME"
     quit_button.visible = OS.has_feature("mobile")
     $UI/TouchConfig/VBox.add_child(quit_button)
     $UI/TouchConfig/VBox.move_child(quit_button,mods_button.get_index()+1)
@@ -12277,7 +12280,7 @@ func _open_quit_prompt() -> void:
     quit_prompt_open = true
     quit_prompt_stage = 0
     quit_prompt_index = 0
-    quit_prompt_title.text = "QUIT GAME?"
+    quit_prompt_title.text = _quit_prompt_title_text(0)
     quit_prompt.visible = true
     if started:
         world.set_gameplay_enabled(false)
@@ -12290,6 +12293,28 @@ func _close_quit_prompt() -> void:
     if started:
         world.set_gameplay_enabled(true)
         touch_controls.set_game_active(true)
+
+## The prompt leaves the app on desktop and Android, but iOS gives an app no way
+## to end itself, so there it leads back to the title screen instead; the wording
+## follows (0 = leave?, 1 = save before leaving?).
+func _quit_prompt_title_text(stage_index: int) -> String:
+    if OS.has_feature("ios"):
+        return "TITLE SCREEN?" if stage_index == 0 else "SAVE BEFORE EXIT?"
+    return "QUIT GAME?" if stage_index == 0 else "SAVE BEFORE QUIT?"
+
+## iOS only: after saving (or choosing not to), go back to the title screen
+## instead of get_tree().quit(), which does nothing there. Reloading the main
+## scene tears the world, the player and the loaded save down and shows the
+## splash, then SINGLE PLAYER / MULTIPLAYER and the setup panel again.
+func _return_to_title_screen() -> void:
+    quit_prompt_open = false
+    quit_prompt_stage = 0
+    quit_prompt_index = 0
+    quit_prompt.visible = false
+    message_panel.visible = false
+    # Deferred: the reload frees this node, so this input event and the frame
+    # it belongs to must finish first and nothing may touch the node after it.
+    get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
 
 func _update_quit_prompt_cursor() -> void:
     if quit_prompt_index == 0:
@@ -12318,7 +12343,7 @@ func _handle_quit_prompt_input(event: InputEvent) -> void:
                 # User confirmed quit. Ask whether to save before leaving.
                 quit_prompt_stage = 1
                 quit_prompt_index = 0
-                quit_prompt_title.text = "SAVE BEFORE QUIT?"
+                quit_prompt_title.text = _quit_prompt_title_text(1)
                 _update_quit_prompt_cursor()
         else:
             if quit_prompt_index == 0:
@@ -12331,7 +12356,12 @@ func _handle_quit_prompt_input(event: InputEvent) -> void:
                     return
             set_process_input(false)
             await shared_save_folder.export_files(self)
-            get_tree().quit()
+            # get_tree().quit() is a no-op on iOS, so the prompt there returns
+            # to the title screen instead of ending the app.
+            if OS.has_feature("ios"):
+                _return_to_title_screen()
+            else:
+                get_tree().quit()
         get_viewport().set_input_as_handled()
 
 func _save_current_game_for_quit() -> bool:

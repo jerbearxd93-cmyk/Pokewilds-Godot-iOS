@@ -82,7 +82,16 @@ Harmless on iOS, no action taken: `[android]` project settings, gradle keys,
 - New **QUIT GAME** row in the touch panel (visible on mobile only), wired to
   `_quit_from_touch_config()` → `_close_touch_config()` + `_open_quit_prompt()`.
   This is the only route to the quit/save-before-quit prompt on iOS, which has
-  no system Back.
+  no system Back. The row reads **TITLE SCREEN** on iOS, where it does not end
+  the app.
+- iOS never reaches `get_tree().quit()`, which does nothing there:
+  `_handle_quit_prompt_input()` hands over to **`_return_to_title_screen()`**
+  instead, which reloads `res://scenes/main.tscn` (deferred, so the input event
+  and its frame finish first). That tears the world, the player, the party and
+  any co-op session down as a cold start would, and shows the splash, then
+  SINGLE PLAYER / MULTIPLAYER and the setup panel. Prompt wording follows with
+  `_quit_prompt_title_text()`: `TITLE SCREEN?` / `SAVE BEFORE EXIT?` on iOS,
+  `QUIT GAME?` / `SAVE BEFORE QUIT?` everywhere else.
 - **GAME FILES** row is now visible only on Android (it needs the Android
   shared-folder bridge). The modding row and all settings rows are unchanged.
 - `_prepare_swipe_cursor()` skips hidden rows, so the swipe cursor can never
@@ -100,9 +109,14 @@ Harmless on iOS, no action taken: `[android]` project settings, gradle keys,
 
 ### `scripts/game_data_paths.gd`
 
-- Comment only. iOS (like desktop) keeps the sandbox `user://` root: there is no
-  equivalent of Android's shared external folder, and `user://` survives app
-  updates and is included in device backups.
+- Comment only. iOS points the live root at the app's **Documents** folder
+  (`OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)`), so saves show up under *On My
+  iPhone* in the Files app; that needs `user_data/accessible_from_files_app` and
+  `user_data/accessible_from_itunes_sharing` in the preset, both on.
+- An unhelpful answer from the platform (empty, relative, or a folder that
+  cannot be created) keeps the private `user://` root and `initialize()` pushes
+  the reason. The first launch copies private saves over once and leaves a
+  `.private-saves-migrated` marker, so it never overwrites later saves.
 
 ### `scripts/game_files_menu.gd`
 
@@ -168,13 +182,19 @@ Then check, in this order:
   CONTROLS, RESET, MODDING, QUIT GAME, CLOSE all respond.
 - **Edit mode**: MOVE CONTROLS → drag a button → tap the "DRAG CONTROLS" hint to
   save. Then check the layout persisted after an app restart.
-- **QUIT GAME**: panel → QUIT GAME → QUIT GAME? → SAVE BEFORE QUIT? → QUIT
-  actually exits; the save is present on the next launch.
+- **TITLE SCREEN (iOS)**: panel → TITLE SCREEN → TITLE SCREEN? → SAVE BEFORE
+  EXIT? → YES or NO returns to the SINGLE PLAYER / MULTIPLAYER choice with the
+  world torn down, no Godot error in the log and nothing left running; a save
+  made on the way out is found by LOAD. A co-op session drops, as a cold start
+  would.
+- **QUIT GAME (Android/desktop)**: unchanged; the prompt still exits the game.
 - **Save/load**: new world → play → save → quit → relaunch → LOAD finds it.
   Then a second save and an in-game area transition.
-- **Data paths**: confirm `user://` on the device (`Library/Application Support`
-  inside the app container, findable via Xcode > Devices > Download Container).
-  `saves/`, `game.ini`, `world_cache/` should appear there.
+- **Data paths**: with `user_data/accessible_from_files_app` and
+  `accessible_from_itunes_sharing` on, *Files > On My iPhone > Pokewilds* shows
+  `saves/`, `game.ini` and `world_cache/`. If it does not, the log says "The app
+  Documents folder is unavailable" and everything stays under
+  `Library/Application Support` (Xcode > Devices > Download Container).
 - **Text entry**: WORLD NAME and PLAYER NAME open the iOS keyboard, accept
   input, and close on confirm without leaving the menu stuck.
 - **Background/foreground**: home button mid-game, return — no stuck buttons,
