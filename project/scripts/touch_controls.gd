@@ -62,14 +62,17 @@ const JOY_BUTTONS := {
     "L1": JOY_BUTTON_LEFT_SHOULDER, "R1": JOY_BUTTON_RIGHT_SHOULDER
 }
 
-var android_runtime := false
+## True on touch-first mobile runtimes (Android and iOS). The pad, the touch
+## settings panel, the safe-area insets and the edit mode all key off it, so
+## every platform check here asks for mobile rather than for one OS.
+var touch_runtime := false
 var usable_rect := Rect2(0, 0, 320, 180)
 var safe_area_poll := 0.0
 const DESIGN_SIZE := Vector2(320, 180)
 
 func _ready() -> void:
-    android_runtime = OS.has_feature("android")
-    if android_runtime:
+    touch_runtime = OS.has_feature("mobile")
+    if touch_runtime:
         DisplayServer.screen_set_orientation(DisplayServer.SCREEN_SENSOR_LANDSCAPE)
     _create_reference_controls()
     _check_launch_control_sizes()
@@ -106,7 +109,11 @@ func _create_reference_controls() -> void:
         control.caption = {"L1":"LB","R1":"RB","L2":"LT","R2":"RT"}.get(control_name,control_name)
         control.size = CONTROL_LAYOUT[control_name].size
         add_child(control)
-    $EditHint.text = "DRAG CONTROLS - ANDROID BACK SAVES"
+    # Android leaves edit mode with system Back. iOS has no Back control, so
+    # the hint itself is the save button and says so.
+    var back_hint := "ANDROID BACK SAVES" if OS.has_feature("android") \
+        else "TAP HERE TO SAVE"
+    $EditHint.text = "DRAG CONTROLS - " + back_hint
     $EditHint.add_theme_font_override("font", preload("res://assets/touch_ui/Anton-Regular.ttf"))
     $EditHint.add_theme_font_size_override("font_size", 7)
     $EditHint.add_theme_color_override("font_color", Color.WHITE)
@@ -119,7 +126,7 @@ func _check_launch_control_sizes() -> void:
         (get_node(control_name) as Control).size = CONTROL_LAYOUT[control_name].size*ratio
 
 func _process(delta: float) -> void:
-    if not android_runtime: return
+    if not touch_runtime: return
     safe_area_poll += delta
     if safe_area_poll >= 0.5:
         safe_area_poll = 0.0
@@ -134,7 +141,9 @@ static func safe_rect_in_canvas(screen_safe: Rect2, screen_transform: Transform2
 func _refresh_display_layout() -> void:
     var bounds := Rect2(Vector2.ZERO, size)
     if not bounds.has_area(): return
-    if OS.has_feature("android"):
+    # Android cutouts and the iPhone notch, Dynamic Island and home indicator
+    # are reported the same way, so both use the safe rectangle every poll.
+    if touch_runtime:
         var screen_transform := get_viewport().get_screen_transform() * get_global_transform_with_canvas()
         bounds = safe_rect_in_canvas(Rect2(DisplayServer.get_display_safe_area()), screen_transform, bounds)
     _apply_safe_rect(bounds)
@@ -235,7 +244,7 @@ func resolved_theme_is_dark() -> bool:
     )
 
 func begin_edit() -> void:
-    if not android_runtime or not game_active:
+    if not touch_runtime or not game_active:
         return
     edit_mode = true
     dragging = null
@@ -267,7 +276,7 @@ func _on_controller_state_changed(connected: bool) -> void:
 
 func _refresh_visibility() -> void:
     var hidden_by_controller := auto_hide_controller and controller_connected
-    var should_show := android_runtime and game_active and (
+    var should_show := touch_runtime and game_active and (
         edit_mode or (touch_enabled and not hidden_by_controller)
     )
     if visible and not should_show:
@@ -349,6 +358,12 @@ func _route_contact(index: int, point: Vector2, pressed: bool, canceled: bool) -
             _save_layout()
         elif not touch_owners.values().has(control_name):
             _set_virtual_button(control_name,false)
+        get_viewport().set_input_as_handled()
+        return
+    # A device without a Back control (iOS) finishes editing by tapping the hint:
+    # in edit mode the control glyphs only drag, they never press.
+    if edit_mode and $EditHint.visible and $EditHint.get_global_rect().has_point(point):
+        end_edit()
         get_viewport().set_input_as_handled()
         return
     # Resolve overlapping padded hit areas by the nearest visible control.
