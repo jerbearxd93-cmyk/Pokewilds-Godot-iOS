@@ -94,4 +94,3 @@ Retain all existing credits. Godot and Android/Gradle dependencies have their ow
 terms; follow their distribution notices. The game licensing issues in
 LICENSE-STATUS.txt must be resolved before an open-source release.
 
-
