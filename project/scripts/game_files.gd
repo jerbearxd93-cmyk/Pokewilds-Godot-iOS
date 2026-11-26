@@ -7,6 +7,9 @@ const MAGIC := "POKEWILDS_SAVE_1\n"
 const MAX_FILE := 268435456
 const MAX_TOTAL := 1073741824
 const Cache = preload("res://scripts/source_world_cache.gd")
+## Save files live under the live data root, which is external storage on
+## Android and the app sandbox elsewhere. Never hard-code user:// here.
+const DataPaths = preload("res://scripts/game_data_paths.gd")
 static var selected_root := ""
 static var last_error := ""
 
@@ -128,7 +131,7 @@ static func export_save(save_path: String, destination: String) -> String:
     var data = JSON.parse_string(FileAccess.get_file_as_string(save_path))
     if not save_valid(data): return "Invalid save: " + save_path.get_file()
     var sources := {"save.json": save_path}
-    for cache in required_caches(data): sources[cache] = "user://" + cache
+    for cache in required_caches(data): sources[cache] = DataPaths.path(cache)
     var entries: Array = []
     var total := 0
     for name in sources:
@@ -157,12 +160,13 @@ static func export_save(save_path: String, destination: String) -> String:
     return "" if success else "Export failed. Check folder access and free storage."
 
 static func export_all() -> String:
-    if not DirAccess.dir_exists_absolute("user://saves"): return "No saved games yet. Save in-game first."
+    var saves := DataPaths.path("saves")
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(saves)): return "No saved games yet. Save in-game first."
     var count := 0
     var stamp := str(int(Time.get_unix_time_from_system())) + "-" + str(Time.get_ticks_usec())
-    for name in DirAccess.get_files_at("user://saves"):
+    for name in DirAccess.get_files_at(saves):
         if not name.ends_with(".json"): continue
-        var error := export_save("user://saves/" + name, shared_path("saves/" + name.get_basename() + "-" + stamp + ".pwsave"))
+        var error := export_save(saves.path_join(name), shared_path("saves/" + name.get_basename() + "-" + stamp + ".pwsave"))
         if not error.is_empty(): return "%d exported. %s" % [count, error]
         count += 1
     return "%d saves exported. Share the .pwsave files." % count if count else "No saved games yet. Save in-game first."
@@ -188,7 +192,7 @@ static func import_save(path: String) -> String:
         if int(entry.size) <= 0 or int(entry.size) > MAX_FILE or float(entry.size) != int(entry.size): return "Invalid save length."
         total += int(entry.size); names[name] = true
     if total > MAX_TOTAL or total != input.get_length() - input.get_position() or not names.has("save.json"): return "Incomplete save file."
-    var staging := "user://transfer_" + str(Time.get_ticks_usec())
+    var staging := DataPaths.path("transfer_" + str(Time.get_ticks_usec()))
     var staged: Array[String] = []
     var failure := ""
     for entry in entries:
@@ -213,7 +217,7 @@ static func _install_staged(staging: String, names: Dictionary) -> String:
     if not save_valid(data): return "Unsupported or invalid saved game."
     var required := required_caches(data)
     if names.size() != required.size() + 1: return "Save contains unexpected world data."
-    var destination := "user://saves/" + safe_name(data.world_name) + ".json"
+    var destination := DataPaths.path("saves/" + safe_name(data.world_name) + ".json")
     if FileAccess.file_exists(destination):
         if FileAccess.get_sha256(destination) == FileAccess.get_sha256(save_path):
             return "This save already exists. Nothing was replaced."
@@ -221,7 +225,7 @@ static func _install_staged(staging: String, names: Dictionary) -> String:
         var suffix := 1
         while FileAccess.file_exists(destination):
             data.world_name = original_name + " Imported " + str(suffix)
-            destination = "user://saves/" + safe_name(data.world_name) + ".json"
+            destination = DataPaths.path("saves/" + safe_name(data.world_name) + ".json")
             suffix += 1
         if write_bytes(save_path, JSON.stringify(data).to_utf8_buffer()) != OK:
             return "Cannot prepare imported save name."
@@ -233,22 +237,23 @@ static func _install_staged(staging: String, names: Dictionary) -> String:
         var valid: bool = file.get_32() == Cache.CACHE_MAGIC.length() and file.get_buffer(Cache.CACHE_MAGIC.length()).get_string_from_utf8() == Cache.CACHE_MAGIC and file.get_32() == Cache.CACHE_VERSION and file.get_64() == absi(required[cache][0]) and file.get_32() == required[cache][1]
         file.close()
         if not valid: return "World cache does not match its saved world."
-        if FileAccess.file_exists("user://" + cache) and FileAccess.get_sha256(cached) != FileAccess.get_sha256("user://" + cache):
+        var installed_cache := DataPaths.path(cache)
+        if FileAccess.file_exists(installed_cache) and FileAccess.get_sha256(cached) != FileAccess.get_sha256(installed_cache):
             return "Conflicting world cache. Nothing was replaced."
     var installed: Array[String] = []
     var failure := ""
-    DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://world_cache"))
-    DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://saves"))
+    DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DataPaths.path("world_cache")))
+    DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DataPaths.path("saves")))
     for cache in required:
-        var target: String = "user://" + cache
+        var target: String = DataPaths.path(cache)
         if FileAccess.file_exists(target): continue
-        if DirAccess.rename_absolute(staging.path_join(cache), target) != OK:
+        if DirAccess.rename_absolute(ProjectSettings.globalize_path(staging.path_join(cache)), ProjectSettings.globalize_path(target)) != OK:
             failure = "Cannot install world data."; break
         installed.append(target)
     # The save becomes visible to LOAD GAME only after every cache is present.
-    if failure.is_empty() and DirAccess.rename_absolute(save_path, destination) != OK:
+    if failure.is_empty() and DirAccess.rename_absolute(ProjectSettings.globalize_path(save_path), ProjectSettings.globalize_path(destination)) != OK:
         failure = "Cannot install saved game."
     if not failure.is_empty():
-        for target in installed: DirAccess.remove_absolute(target)
+        for target in installed: DirAccess.remove_absolute(ProjectSettings.globalize_path(target))
     return failure
 

@@ -5,6 +5,9 @@ static var android_storage: Variant = null
 
 static func root_path() -> String:
     if not directory.is_empty(): return directory
+    # Android can move the whole live folder to external storage. iOS exports
+    # have no equivalent shared location, so they keep the sandbox user://
+    # folder, which survives updates and is covered by device backups.
     directory = "user://"
     if OS.get_name() == "Android":
         if Engine.has_singleton("JavaClassWrapper"):

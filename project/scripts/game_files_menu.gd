@@ -92,7 +92,7 @@ func activate() -> void:
     if selection==2:showing_help=true;help_page=0;_refresh();return
     var shared:Node=main.shared_save_folder
     if shared.bridge==null:
-        status.text="Folder selection is available in the Android app.";return
+        status.text=("GAME FILES is Android only. iOS keeps saves inside the app." if OS.get_name()=="iOS" else "Folder selection is available in the Android app.");return
     busy=true
     status.text="Working... Keep the game open."
     while shared.exporting or shared.bridge.busy():await get_tree().process_frame
