@@ -1,4 +1,4 @@
-# Pokewilds-Godot
+# Pokewilds-iOS IPA
 A native port of pokewilds for iOS.
 
 ## Source code
