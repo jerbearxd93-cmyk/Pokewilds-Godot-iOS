@@ -3,7 +3,7 @@ A native port of pokewilds for iOS.
 
 ## Source code
 
-**[Download source code](https://github.com/TryTheSauceBoss/Pokewilds-Android/releases/tag/source-v0.9.3)**
+**[Download source code](https://github.com/TryTheSauceBoss/Pokewilds-Android/releases/tag/source-v0.9.3)** (PC/MAC)
 
 On the release page, download **Pokewilds-Source-PAckage.zip**. It includes the original project, source code, assets, build instructions, licenses and credits.
 
