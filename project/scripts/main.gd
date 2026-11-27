@@ -1469,9 +1469,8 @@ func _ready() -> void:
     # to the quit prompt there; Android keeps its Back control for that.
     var quit_button := Button.new()
     quit_button.name="QuitGame"
-    # iOS gives an app no way to end itself, so the same row returns to the
-    # title screen there; Android keeps the real quit it has always had.
-    quit_button.text = "TITLE SCREEN" if _is_ios() else "QUIT GAME"
+    # One wording on every platform: the row leads to the same quit prompt.
+    quit_button.text = "QUIT GAME"
     quit_button.visible = OS.has_feature("mobile")
     $UI/TouchConfig/VBox.add_child(quit_button)
     $UI/TouchConfig/VBox.move_child(quit_button,mods_button.get_index()+1)
@@ -12303,18 +12302,15 @@ func _close_quit_prompt() -> void:
         world.set_gameplay_enabled(true)
         touch_controls.set_game_active(true)
 
-## The prompt leaves the app on desktop and Android, but iOS gives an app no way
-## to end itself, so there it leads back to the title screen instead; the wording
-## follows (0 = leave?, 1 = save before leaving?).
+## One wording on every platform (0 = quit?, 1 = save before quitting?). The iOS
+## exit path below is unchanged; only the labels stopped differing.
 func _quit_prompt_title_text(stage_index: int) -> String:
-    if _is_ios():
-        return "TITLE SCREEN?" if stage_index == 0 else "SAVE BEFORE EXIT?"
     return "QUIT GAME?" if stage_index == 0 else "SAVE BEFORE QUIT?"
 
-## iOS only: after saving (or choosing not to), go back to the title screen
-## instead of get_tree().quit(), which does nothing there. Reloading the main
-## scene tears the world, the player and the loaded save down and shows the
-## splash, then SINGLE PLAYER / MULTIPLAYER and the setup panel again.
+## iOS: after saving (or choosing not to), leave through this title-screen reset
+## rather than get_tree().quit(). Reloading the main scene tears the world, the
+## player and the loaded save down and shows the splash, then SINGLE PLAYER /
+## MULTIPLAYER and the setup panel again.
 func _return_to_title_screen() -> void:
     quit_prompt_open = false
     quit_prompt_stage = 0
@@ -12376,7 +12372,7 @@ func _watch_title_screen_reload(retries_left: int) -> void:
 ## Written to the log and to the dialogue box, so a failure is visible on the
 ## device without a debugger attached.
 func _report_title_screen_failure(detail: String) -> void:
-    var text := "TITLE SCREEN FAILED: " + detail
+    var text := "EXIT FAILED: " + detail
     push_error(text)
     print("[title] " + text)
     _show_message(text)

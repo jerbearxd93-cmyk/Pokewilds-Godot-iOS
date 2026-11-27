@@ -82,16 +82,15 @@ Harmless on iOS, no action taken: `[android]` project settings, gradle keys,
 - New **QUIT GAME** row in the touch panel (visible on mobile only), wired to
   `_quit_from_touch_config()` → `_close_touch_config()` + `_open_quit_prompt()`.
   This is the only route to the quit/save-before-quit prompt on iOS, which has
-  no system Back. The row reads **TITLE SCREEN** on iOS, where it does not end
-  the app.
-- iOS never reaches `get_tree().quit()`, which does nothing there:
-  `_handle_quit_prompt_input()` hands over to **`_return_to_title_screen()`**
-  instead, which reloads `res://scenes/main.tscn` (deferred, so the input event
-  and its frame finish first). That tears the world, the player, the party and
-  any co-op session down as a cold start would, and shows the splash, then
-  SINGLE PLAYER / MULTIPLAYER and the setup panel. Prompt wording follows with
-  `_quit_prompt_title_text()`: `TITLE SCREEN?` / `SAVE BEFORE EXIT?` on iOS,
-  `QUIT GAME?` / `SAVE BEFORE QUIT?` everywhere else.
+  no system Back. The row and the prompt use the same wording on every platform:
+  `QUIT GAME`, `QUIT GAME?`, `SAVE BEFORE QUIT?`.
+- iOS never reaches `get_tree().quit()`: `_handle_quit_prompt_input()` hands
+  over to **`_return_to_title_screen()`**, which ends any co-op session, unpauses
+  the tree, restores input processing and replaces the scene with
+  `res://scenes/main.tscn` — checked `change_scene_to_file`, then
+  `reload_current_scene`, then a 5 second watchdog that reports to the dialogue
+  box and the log if the swap never happened. On a device this exit has been
+  observed to close the app cleanly, which is what the labels now describe.
 - **GAME FILES** row is now visible only on Android (it needs the Android
   shared-folder bridge). The modding row and all settings rows are unchanged.
 - `_prepare_swipe_cursor()` skips hidden rows, so the swipe cursor can never
@@ -145,10 +144,10 @@ Harmless on iOS, no action taken: `[android]` project settings, gradle keys,
    and works with `NSLocalNetworkUsageDescription` alone.
 3. **GAME FILES shared folder.** Android SAF only. On iOS saves stay in the app
    sandbox; there is no in-app copy-out yet (see follow-ups).
-4. **QUIT GAME and App Review.** The quit flow ends in `get_tree().quit()`. That
-   is fine for development and sideloaded builds, but Apple discourages
-   programmatic termination (App Store Review Guideline 2.5.1). For a store
-   submission, either relabel the row or make it return to the title screen.
+4. **QUIT GAME and App Review.** The row reads QUIT GAME on every platform and
+   all platforms run the same exit flow, which on a device has been seen to
+   terminate the app. Apple discourages programmatic termination (App Store
+   Review Guideline 2.5.1), so review this before any store submission.
 5. **JSON save compatibility.** Unchanged in principle (same `.json` + 
    `exact_v2_*.bin` caches), but iOS has never actually written a save. Verify
    it before trusting it.
@@ -182,11 +181,10 @@ Then check, in this order:
   CONTROLS, RESET, MODDING, QUIT GAME, CLOSE all respond.
 - **Edit mode**: MOVE CONTROLS → drag a button → tap the "DRAG CONTROLS" hint to
   save. Then check the layout persisted after an app restart.
-- **TITLE SCREEN (iOS)**: panel → TITLE SCREEN → TITLE SCREEN? → SAVE BEFORE
-  EXIT? → YES or NO returns to the SINGLE PLAYER / MULTIPLAYER choice with the
-  world torn down, no Godot error in the log and nothing left running; a save
-  made on the way out is found by LOAD. A co-op session drops, as a cold start
-  would.
+- **QUIT GAME (iOS)**: panel → QUIT GAME → QUIT GAME? → SAVE BEFORE QUIT? → YES
+  or NO ends the game and the app closes; a save made on the way out is found by
+  LOAD on the next launch. No "TITLE SCREEN" or "SAVE BEFORE EXIT?" text should
+  appear anywhere.
 - **QUIT GAME (Android/desktop)**: unchanged; the prompt still exits the game.
 - **Save/load**: new world → play → save → quit → relaunch → LOAD finds it.
   Then a second save and an in-game area transition.
