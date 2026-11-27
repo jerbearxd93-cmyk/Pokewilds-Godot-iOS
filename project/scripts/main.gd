@@ -1288,6 +1288,8 @@ var shared_save_folder: Node
 var dark_mode_ui: Node
 
 func _ready() -> void:
+    if _is_ios():
+        print("[boot] main scene ready")
     # Keep initialization and Android folder synchronization offscreen.
     $UI.hide()
     world.hide()
@@ -1469,7 +1471,7 @@ func _ready() -> void:
     quit_button.name="QuitGame"
     # iOS gives an app no way to end itself, so the same row returns to the
     # title screen there; Android keeps the real quit it has always had.
-    quit_button.text = "TITLE SCREEN" if OS.has_feature("ios") else "QUIT GAME"
+    quit_button.text = "TITLE SCREEN" if _is_ios() else "QUIT GAME"
     quit_button.visible = OS.has_feature("mobile")
     $UI/TouchConfig/VBox.add_child(quit_button)
     $UI/TouchConfig/VBox.move_child(quit_button,mods_button.get_index()+1)
@@ -1509,6 +1511,8 @@ func _ready() -> void:
     $StartupSplash.hide()
     # First choice after the splash: SINGLE PLAYER or MULTIPLAYER.
     coop_menu.open()
+    if _is_ios():
+        print("[boot] title screen shown")
     dark_mode_ui = preload("res://scripts/dark_mode.gd").new()
     add_child(dark_mode_ui)
     dark_mode_ui.configure($UI)
@@ -4851,6 +4855,11 @@ func _menu_stick_event_is_blocked(event: InputEvent) -> bool:
         last_menu_stick_msec = now
         return false
     return true
+
+## iOS reports itself as "iOS" from OS.get_name(); the feature tag is checked as
+## well so an unusual build still takes the iOS path.
+func _is_ios() -> bool:
+    return OS.get_name() == "iOS" or OS.has_feature("ios")
 
 func _is_touch_runtime() -> bool:
     # Touch-first mobile runtime: Android and iOS. Android also has system Back
@@ -12298,7 +12307,7 @@ func _close_quit_prompt() -> void:
 ## to end itself, so there it leads back to the title screen instead; the wording
 ## follows (0 = leave?, 1 = save before leaving?).
 func _quit_prompt_title_text(stage_index: int) -> String:
-    if OS.has_feature("ios"):
+    if _is_ios():
         return "TITLE SCREEN?" if stage_index == 0 else "SAVE BEFORE EXIT?"
     return "QUIT GAME?" if stage_index == 0 else "SAVE BEFORE QUIT?"
 
@@ -12312,9 +12321,65 @@ func _return_to_title_screen() -> void:
     quit_prompt_index = 0
     quit_prompt.visible = false
     message_panel.visible = false
-    # Deferred: the reload frees this node, so this input event and the frame
-    # it belongs to must finish first and nothing may touch the node after it.
-    get_tree().call_deferred("change_scene_to_file", "res://scenes/main.tscn")
+    # Nothing may stay paused or detached from input while the scene is swapped.
+    get_tree().paused = false
+    set_process_input(true)
+    set_process_unhandled_input(true)
+    _tear_down_for_title_screen()
+    print("[title] returning to the title screen")
+    # Deferred: replacing the scene frees this node, so this input event and the
+    # frame it belongs to must finish first.
+    call_deferred("_reload_for_title_screen")
+
+## Ends any online session before the scene is replaced: the transport, the
+## lobby advert and the online cache must not outlive this scene.
+func _tear_down_for_title_screen() -> void:
+    if is_instance_valid(coop_game) and coop_game.active:
+        # The usual session shutdown, without its own scene reload.
+        coop_game.end_session("RETURNED TO THE TITLE SCREEN.", false)
+    preload("res://scripts/crafting_data.gd").online_enabled = false
+    if is_instance_valid(world):
+        world.set_gameplay_enabled(false)
+
+## Replaces the running scene with the title screen. The returned error is
+## checked and printed: an unchecked scene change is exactly how this failed
+## silently before.
+func _reload_for_title_screen() -> void:
+    var main_scene := String(ProjectSettings.get_setting("application/run/main_scene", "res://scenes/main.tscn"))
+    if main_scene.is_empty(): main_scene = "res://scenes/main.tscn"
+    var error := get_tree().change_scene_to_file(main_scene)
+    print("[title] change_scene_to_file(%s) -> %s (%d)" % [main_scene, error_string(error), error])
+    if error == OK:
+        _watch_title_screen_reload(1)
+        return
+    var reload_error := get_tree().reload_current_scene()
+    print("[title] reload_current_scene -> %s (%d)" % [error_string(reload_error), reload_error])
+    if reload_error == OK:
+        _watch_title_screen_reload(0)
+        return
+    _report_title_screen_failure("%s (%d)" % [error_string(error), error])
+
+## A replaced scene frees this node, so this wait can only run to the end when
+## the swap did not happen. That turns a silent no-op into one retry, then a
+## visible message.
+func _watch_title_screen_reload(retries_left: int) -> void:
+    await get_tree().create_timer(5.0).timeout
+    print("[title] the scene was not replaced")
+    if retries_left > 0:
+        var retry_error := get_tree().reload_current_scene()
+        print("[title] retry reload_current_scene -> %s (%d)" % [error_string(retry_error), retry_error])
+        if retry_error == OK:
+            _watch_title_screen_reload(retries_left - 1)
+            return
+    _report_title_screen_failure("the scene was not replaced")
+
+## Written to the log and to the dialogue box, so a failure is visible on the
+## device without a debugger attached.
+func _report_title_screen_failure(detail: String) -> void:
+    var text := "TITLE SCREEN FAILED: " + detail
+    push_error(text)
+    print("[title] " + text)
+    _show_message(text)
 
 func _update_quit_prompt_cursor() -> void:
     if quit_prompt_index == 0:
@@ -12358,7 +12423,7 @@ func _handle_quit_prompt_input(event: InputEvent) -> void:
             await shared_save_folder.export_files(self)
             # get_tree().quit() is a no-op on iOS, so the prompt there returns
             # to the title screen instead of ending the app.
-            if OS.has_feature("ios"):
+            if _is_ios():
                 _return_to_title_screen()
             else:
                 get_tree().quit()

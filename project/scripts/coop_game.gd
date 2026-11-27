@@ -663,14 +663,14 @@ func _connection_lost()->void:
     if not active or hosting:return
     end_session("HOST DISCONNECTED.\nSESSION ENDED." if _host_answered else UNREACHABLE)
 
-func end_session(reason:String)->void:
+func end_session(reason:String,reload:bool=true)->void:
     print("ONLINE session ended: ",reason," (transport: ",session.transport.last_disconnect_reason,")")
     preload("res://scripts/crafting_data.gd").online_enabled=false
     main.world.set_gameplay_enabled(false)
     active=false;ended_reason=reason
     lobby.stop_advertise();Network.host_close();Network.join_close()
     session.stop();Cache.online_namespace=""
-    get_tree().call_deferred("reload_current_scene")
+    if reload:get_tree().call_deferred("reload_current_scene")
 
 func world_time(delta:float)->float:
     if hosting:return clock_seconds
