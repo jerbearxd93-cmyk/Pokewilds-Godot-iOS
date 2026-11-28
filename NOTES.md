@@ -27,6 +27,7 @@ Android-only in the touch panel.
 | 7 | LAN multiplayer silently blocked: iOS 14+ needs `NSLocalNetworkUsageDescription`, and broadcast lobby discovery additionally needs Apple's multicast entitlement | export preset, `scripts/coop_network.gd` |
 | 8 | Save helpers bypassed the live data root (`user://saves`, `user://world_cache` hard-coded) while saves are written through `game_data_paths.path()`. On Android external storage those helpers pointed at the wrong folder | `scripts/game_files.gd` |
 | 9 | GAME FILES panel offered on every platform, but it needs the Android shared-folder bridge | `scripts/main.gd`, `scripts/game_files_menu.gd` |
+| 10 | STORAGE deposit from the menu (game menu > STORAGE) with no STORAGE BOX opened yet fell through to the SHARED chest, which the storage screen does not list: the POKéMON left the party and the screen showed nothing | `scripts/main.gd` |
 
 Not iOS-specific, found while reading: `game_files.export_all/export_save/import_save`
 are currently unreferenced dead code (`game_options.gd` only uses `copy_file` and
@@ -95,6 +96,40 @@ Harmless on iOS, no action taken: `[android]` project settings, gradle keys,
   shared-folder bridge). The modding row and all settings rows are unchanged.
 - `_prepare_swipe_cursor()` skips hidden rows, so the swipe cursor can never
   select a row a platform hides.
+
+### PC storage: deposited POKéMON seemed to vanish (`scripts/main.gd`)
+
+Found on a device, not caused by this port: the same bug exists on Android and PC.
+
+- **Cause.** `_storage_deposit_key()` chose a box in three steps: the last box
+  opened, then `_built_storage_keys()`, then *the first key in `pokemon_storage`*.
+  `_built_storage_keys()` never returns the SHARED chest (it belongs to the
+  device, not to a box), but the last fallback did — and a single-player world
+  always has a `"SHARED"` key, because `_start_game()` creates it from
+  `shared_storage.adopt()`. So depositing from **game menu > STORAGE** before
+  opening a physical STORAGE BOX put the POKéMON into the SHARED chest, and
+  `_storage_pool_locations()` deliberately left that key out of the worldwide
+  list. Result: the POKéMON left the party, the storage screen showed nothing,
+  and the only way to see them again was to stand at a PRIVATE CHEST.
+- **Fix, deposit.** The fallback to `pokemon_storage.keys()[0]` is gone. With no
+  box to deposit into, `_storage_deposit_key()` returns `""` and the existing
+  "Build a STORAGE BOX first." notice is shown. `_storage_apply_action()` now
+  settles the destination **before** removing the POKéMON from the party, so a
+  refused deposit can never lose it.
+- **Fix, visibility.** `_storage_pool_locations()` still hides an *empty* SHARED
+  chest, but a SHARED chest that holds POKéMON is now listed, so anything
+  already stranded there can be seen and taken back (TAKE works on it).
+- **Checked and found correct**, so left alone: `shared_storage.path()` already
+  goes through `game_data_paths.path()`; `SAVE_DIR`, `SAVE_INDEX_PATH`,
+  `GameOptions.PATH` and `source_world_cache` all use the same live root, so
+  there is no `user://` versus `game_data_paths.path()` split in the storage or
+  save pipeline; box keys are pure ASCII (`"0,0|12,34"`), `shared_storage.box`
+  is a fixed literal and save file names are lower-cased by
+  `_safe_world_filename()`, so the case-sensitive iOS filesystem cannot make a
+  box file or a save file miss on the way it was written.
+- **Not verified:** no GDScript was parsed or run here. The exact user-visible
+  path of the original bug was reconstructed from the code (it needs a world
+  with no STORAGE BOX in it, or a save whose only storage key is `SHARED`).
 
 ### `scripts/game_files.gd`
 
@@ -186,6 +221,11 @@ Then check, in this order:
   LOAD on the next launch. No "TITLE SCREEN" or "SAVE BEFORE EXIT?" text should
   appear anywhere.
 - **QUIT GAME (Android/desktop)**: unchanged; the prompt still exits the game.
+- **PC storage**: with **no STORAGE BOX built**, game menu > STORAGE shows
+  "Build a STORAGE BOX first." when you try to STORE; nothing leaves the party.
+  Then build a STORAGE BOX, open it, deposit a POKéMON, press right to the
+  stored side: it is listed, survives closing and reopening the menu, and
+  survives save + quit + LOAD. Finally check TAKE.
 - **Save/load**: new world → play → save → quit → relaunch → LOAD finds it.
   Then a second save and an in-game area transition.
 - **Data paths**: with `user_data/accessible_from_files_app` and

@@ -11886,10 +11886,17 @@ func _storage_pool_locations() -> Array:
     var locations: Array = []
     var keys: Array = pokemon_storage.keys()
     keys.sort()
+    var online: bool = is_instance_valid(coop_game) and coop_game.active
     for key in keys:
-        # The SHARED chest is opened only at a SHARED chest.
-        if String(key) == SHARED_STORAGE_KEY and not (is_instance_valid(coop_game) and coop_game.active): continue
-        for index in range(pokemon_storage[key].size()):
+        var box: Array = []
+        if pokemon_storage[key] is Array:
+            box = pokemon_storage[key]
+        # The SHARED chest is only filled at a SHARED chest, so an empty one
+        # stays out of this list. A SHARED chest that holds POKéMON is always
+        # listed: leaving it out is what made a deposit that reached it
+        # invisible, with no way to see or take the POKéMON back.
+        if String(key) == SHARED_STORAGE_KEY and not online and box.is_empty(): continue
+        for index in range(box.size()):
             locations.append([key, index])
     if is_instance_valid(coop_game) and coop_game.active and not coop_game.storage.sort_mode.is_empty():
         locations.sort_custom(func(a,b):return coop_game.storage.sort_less(pokemon_storage[a[0]][a[1]],pokemon_storage[b[0]][b[1]]))
@@ -11900,12 +11907,16 @@ func _storage_deposit_key() -> String:
         return storage_box_key
     if not preferred_storage_box.is_empty() and pokemon_storage.has(preferred_storage_box):
         return preferred_storage_box
+    # _built_storage_keys() lists the boxes of this world, the boxes of the
+    # neighbouring sections and any box still holding POKéMON, and never the
+    # SHARED chest, which belongs to the device rather than to a box.
     var keys := _built_storage_keys()
     if not keys.is_empty():
         return keys[0]
-    var saved: Array = pokemon_storage.keys()
-    saved.sort()
-    return String(saved[0]) if not saved.is_empty() else ""
+    # Nothing to deposit into. The old fallback took the first key in storage,
+    # which is the SHARED chest in a single-player world, so the POKéMON left
+    # the party and the storage screen showed nothing. Say so instead.
+    return ""
 
 func _storage_entries() -> Array:
     if storage_column == 0:
@@ -12066,6 +12077,15 @@ func _storage_apply_action() -> void:
         pokemon["nickname"] = storage_nickname.text
         world.call("play_source_sound", "coin1")
         return
+    # Settle the destination before anything leaves the party: a STORE with no
+    # box to put it in used to take the POKéMON out first and then write it into
+    # the SHARED chest, where the storage screen could not show it.
+    var destination := ""
+    if storage_pending == "STORE":
+        destination = _storage_deposit_key()
+        if destination.is_empty():
+            _storage_notice("Build a STORAGE BOX first.")
+            return
     if storage_column == 0 and _storage_is_active(pokemon):
         world.call("clear_active_field_move", true)
     if storage_pooled and storage_column == 1:
@@ -12074,7 +12094,6 @@ func _storage_apply_action() -> void:
     else:
         entries.remove_at(storage_index)
     if storage_pending == "STORE":
-        var destination := _storage_deposit_key()
         var box: Array = pokemon_storage.get(destination, [])
         box.append(pokemon)
         pokemon_storage[destination] = box
